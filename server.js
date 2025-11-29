@@ -1,18 +1,46 @@
 const express = require("express");
+const cors = require("cors");
+const axios = require("axios");
 const QRCode = require("qrcode");
+const path = require("path");
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+app.use(cors());
+app.use(express.json());
 
-app.get("/pair", async (req, res) => {
-    const fakePairCode = "PAIR-" + Math.random().toString(36).substring(2, 10).toUpperCase();
-    const qr = await QRCode.toDataURL(fakePairCode);
+// Serve frontend
+app.use(express.static("public"));
 
-    res.json({
-        status: "success",
-        pairCode: fakePairCode,
-        qrCode: qr
-    });
+app.get("/", (req, res) => {
+  res.sendFile(path.join(__dirname, "public", "index.html"));
 });
 
-app.listen(PORT, () => console.log(`Pair code server running on port ${PORT}`));
+// Pair code API endpoint
+app.get("/generate", async (req, res) => {
+  try {
+    const response = await axios.get(
+      "https://pairing.africans-devs.workers.dev/pair"
+    );
+
+    if (!response.data || !response.data.code) {
+      return res.json({ status: "error", message: "Error fetching pair code" });
+    }
+
+    const pairCode = response.data.code;
+    const qrCode = await QRCode.toDataURL(pairCode);
+
+    res.json({
+      status: "success",
+      pairCode,
+      qrCode,
+    });
+  } catch (error) {
+    res.json({ status: "error", message: error.message });
+  }
+});
+
+const PORT = process.env.PORT || 3000;
+
+app.listen(PORT, () => {
+  console.log("Server running on port " + PORT);
+});
