@@ -1,10 +1,10 @@
 services:
   - type: web
-    name: whatsapp-pair-code
+    name: sleek-pair
     env: node
-    plan: free
+    runtime: node
     buildCommand: "npm install"
-    startCommand: "node server.js"
-    envVars:
-      - key: NODE_ENV
-        value: production
+    startCommand: "npm start"
+    nodeVersion: "18"
+    rootDir: "."
+
