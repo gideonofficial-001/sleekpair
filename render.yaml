@@ -1,0 +1,8 @@
+services:
+  - type: web
+    name: sleek-md-pair-final
+    env: node
+    nodeVersion: "18"
+    buildCommand: "npm install"
+    startCommand: "npm start"
+    plan: free
