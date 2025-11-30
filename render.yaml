@@ -1,8 +1,0 @@
-services:
-  - type: web
-    name: sleekpair
-    env: node
-    buildCommand: "npm install"
-    startCommand: "npm start"
-    plan: free
-    autoDeploy: true
