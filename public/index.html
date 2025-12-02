@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>SleekPair Generator</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+<div class="card">
+    <h1>SleekPair Generator</h1>
+    <p>Generate secure WhatsApp pairing codes instantly</p>
+
+    <div class="features">
+        <label><input type="checkbox" id="includeQR" checked /> Include QR Code</label>
+        <label><input type="checkbox" id="includeExpiry" checked /> Include Expiry Timer</label>
+    </div>
+
+    <button onclick="generate()">Generate Code</button>
+
+    <div id="output" class="output">
+        <h3>Pair Code:</h3>
+        <p id="pair"></p>
+        <div id="expiryBox" style="display:none;">
+            <h3>Expires In:</h3>
+            <p id="expiry"></p>
+        </div>
+        <h3>QR Code:</h3>
+        <img id="qr" src="" />
+    </div>
+</div>
+
+<script>
+async function generate() {
+    const res = await fetch("/generate");
+    const data = await res.json();
+
+    document.getElementById("pair").innerText = data.pairCode;
+
+    if (document.getElementById("includeQR").checked) {
+        document.getElementById("qr").src = data.qrCode;
+        document.getElementById("qr").style.display = "block";
+    } else {
+        document.getElementById("qr").style.display = "none";
+    }
+
+    if (document.getElementById("includeExpiry").checked) {
+        document.getElementById("expiryBox").style.display = "block";
+        document.getElementById("expiry").innerText = data.expiry + " seconds";
+    } else {
+        document.getElementById("expiryBox").style.display = "none";
+    }
+
+    document.getElementById("output").style.display = "block";
+}
+</script>
+</body>
+</html>
