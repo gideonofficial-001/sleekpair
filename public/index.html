@@ -12,22 +12,26 @@
   <h2>SLEEK MD – Pair Generator</h2>
 
   <div class="input-group">
-    <label>Phone Number</label>
-    <input id="phone" placeholder="2547XXXXXXXX">
+    <label>Phone Number (with country code)</label>
+    <input id="phone" placeholder="e.g. 254712345678">
   </div>
 
   <div class="input-group">
     <label>Token</label>
-    <input id="token" placeholder="PAIR_SECRET (default: SLEEK_FDROID)">
+    <input id="token" type="password" placeholder="Enter your secret token">
   </div>
 
   <button onclick="generate()">Generate Pair Code</button>
+
+  <p id="msg"></p>
 
   <div id="loader" class="loader" style="display:none;">Generating...</div>
 
   <div id="output" style="display:none;">
     <h3>Pairing Code</h3>
     <p id="pairCode"></p>
+
+    <button onclick="copyCode()">Copy Code</button>
 
     <h3>QR Code</h3>
     <img id="qr" alt="QR Code">
