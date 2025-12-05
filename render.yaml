@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: sleek-md-pair-final
+    name: sleek-md-pair
     env: node
     nodeVersion: "18"
     buildCommand: "npm install"
