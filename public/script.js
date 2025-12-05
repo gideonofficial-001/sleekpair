@@ -1,6 +1,6 @@
 let currentSessionId = null;
 
-// Change this to your deployed backend URL
+// Your deployed backend URL
 const BASE_URL = "https://sleekpair-2.onrender.com";
 
 function showMsg(txt, isError = false) {
@@ -27,8 +27,9 @@ async function generate() {
   showMsg("");
 
   // --- VALIDATION ---
+  // open format: 10–15 digits only, any country code allowed
   if (!/^[0-9]{10,15}$/.test(phone)) {
-    return showMsg("Invalid phone number. Include country code only.", true);
+    return showMsg("Enter a valid phone number with country code.", true);
   }
 
   if (!token) {
@@ -51,6 +52,7 @@ async function generate() {
       return;
     }
 
+    // Populate results
     document.getElementById("pairCode").innerText = data.pairCode;
     document.getElementById("qr").src = data.qrCode;
     document.getElementById("sessionId").innerText = data.sessionId;
@@ -62,12 +64,12 @@ async function generate() {
 
   } catch (err) {
     loader.style.display = "none";
-    showMsg("Error connecting to server.", true);
+    showMsg("Unable to reach server.", true);
   }
 }
 
 function downloadSession() {
-  if (!currentSessionId) return alert("Generate code first.");
+  if (!currentSessionId) return alert("Generate the code first.");
 
   const token = document.getElementById("token").value.trim();
   const url = `${BASE_URL}/api/download-session?sessionId=${currentSessionId}&token=${token}`;
