@@ -1,62 +1,63 @@
-/* style.css */
 body {
-  background: #0d0d0d;
+  background: #111;
   color: #fff;
   font-family: Arial, sans-serif;
-  margin: 0;
-  padding: 0;
   display: flex;
   justify-content: center;
-  align-items: center;
-  height: 100vh;
-}
-#app {
-  width: 90%;
-  max-width: 420px;
-  background: #111;
   padding: 20px;
-  border-radius: 12px;
-  box-shadow: 0 0 20px rgba(0,0,0,0.6);
 }
-h1 {
-  text-align: center;
-  margin-bottom: 20px;
+
+.container {
+  width: 100%;
+  max-width: 420px;
+  background: #1b1b1b;
+  padding: 20px;
+  border-radius: 10px;
 }
-label {
-  margin-top: 10px;
-  display: block;
-  font-size: 14px;
+
+.input-group {
+  margin-bottom: 15px;
 }
+
 input {
   width: 100%;
-  padding: 10px;
-  margin-top: 5px;
+  padding: 12px;
   border-radius: 6px;
   border: none;
-  outline: none;
+  background: #222;
+  color: #fff;
 }
+
 button {
   width: 100%;
-  margin-top: 20px;
   padding: 12px;
-  background: #00aaff;
+  background: #4a7eff;
   border: none;
   border-radius: 6px;
-  font-size: 16px;
   color: #fff;
   cursor: pointer;
+  margin-top: 10px;
 }
+
 button:hover {
-  background: #0088dd;
+  background: #3b6be0;
 }
-#result {
-  margin-top: 20px;
+
+.loader {
+  margin-top: 15px;
   text-align: center;
+  font-size: 14px;
+  color: #aaa;
 }
-.hidden {
-  display: none;
+
+#output {
+  margin-top: 20px;
+  padding: 15px;
+  background: #222;
+  border-radius: 8px;
 }
-#qrImage {
+
+img {
   width: 200px;
   margin-top: 10px;
 }

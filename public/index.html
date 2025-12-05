@@ -1,36 +1,44 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>SLEEK MD Pairer</title>
-  <link rel="stylesheet" href="style.css" />
+  <meta charset="UTF-8">
+  <title>SLEEK MD Pair Generator</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <div id="app">
-    <h1>SLEEK MD PAIRER</h1>
 
-    <form id="pairForm">
-      <label>Token</label>
-      <input type="text" id="token" placeholder="PAIR_SECRET" required />
+<div class="container">
+  <h2>SLEEK MD – Pair Generator</h2>
 
-      <label>Phone Number</label>
-      <input type="text" id="phone" placeholder="2547XXXXXXXX" required />
-
-      <button type="submit">Generate Pair Code</button>
-    </form>
-
-    <div id="result" class="hidden">
-      <h2>Pair Code</h2>
-      <p id="pairCode"></p>
-
-      <h2>QR Code</h2>
-      <img id="qrImage" />
-
-      <button id="downloadBtn">Download Session</button>
-    </div>
+  <div class="input-group">
+    <label>Phone Number</label>
+    <input id="phone" placeholder="2547XXXXXXXX">
   </div>
 
-  <script src="script.js"></script>
+  <div class="input-group">
+    <label>Token</label>
+    <input id="token" placeholder="PAIR_SECRET (default: SLEEK_FDROID)">
+  </div>
+
+  <button onclick="generate()">Generate Pair Code</button>
+
+  <div id="loader" class="loader" style="display:none;">Generating...</div>
+
+  <div id="output" style="display:none;">
+    <h3>Pairing Code</h3>
+    <p id="pairCode"></p>
+
+    <h3>QR Code</h3>
+    <img id="qr" alt="QR Code">
+
+    <h3>Session ID</h3>
+    <p id="sessionId"></p>
+
+    <button onclick="downloadSession()">Download Session ZIP</button>
+  </div>
+</div>
+
+<script src="script.js"></script>
 </body>
 </html>
