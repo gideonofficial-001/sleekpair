@@ -1,5 +1,8 @@
 let currentSessionId = null;
 
+// Change this to your deployed backend URL
+const BASE_URL = "https://sleekpair-2.onrender.com";
+
 function showMsg(txt, isError = false) {
   const msg = document.getElementById("msg");
   msg.style.color = isError ? "red" : "lime";
@@ -36,7 +39,9 @@ async function generate() {
   output.style.display = "none";
 
   try {
-    const res = await fetch(`/api/pair-code?phone=${phone}&token=${token}`);
+    const url = `${BASE_URL}/api/pair-code?phone=${phone}&token=${token}`;
+
+    const res = await fetch(url);
     const data = await res.json();
 
     loader.style.display = "none";
@@ -57,7 +62,7 @@ async function generate() {
 
   } catch (err) {
     loader.style.display = "none";
-    showMsg("Server connection error.", true);
+    showMsg("Error connecting to server.", true);
   }
 }
 
@@ -65,7 +70,7 @@ function downloadSession() {
   if (!currentSessionId) return alert("Generate code first.");
 
   const token = document.getElementById("token").value.trim();
-  const url = `/api/download-session?sessionId=${currentSessionId}&token=${token}`;
+  const url = `${BASE_URL}/api/download-session?sessionId=${currentSessionId}&token=${token}`;
 
   const a = document.createElement("a");
   a.href = url;
