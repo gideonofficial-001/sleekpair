@@ -2,47 +2,83 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>SLEEK MD Pair Generator</title>
+  <title>SLEEK MD Pair Generator – Test</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <link rel="stylesheet" href="style.css">
 </head>
 <body>
 
-<div class="container">
-  <h2>SLEEK MD – Pair Generator</h2>
+<h2>SLEEK MD – Pair Generator (Backend Test)</h2>
 
-  <div class="input-group">
-    <label>Phone Number (with country code)</label>
-    <input id="phone" placeholder="e.g. 254712345678">
-  </div>
+<p>
+  <b>Phone number</b> (international format, digits only):
+</p>
+<input id="phone" placeholder="254712345678">
 
-  <div class="input-group">
-    <label>Token</label>
-    <input id="token" type="password" placeholder="Enter your secret token">
-  </div>
+<p>
+  <b>Token</b>:
+</p>
+<input id="token" type="password" placeholder="Enter secret token">
 
-  <button onclick="generate()">Generate Pair Code</button>
+<br><br>
+<button onclick="generate()">Generate Pair Code</button>
 
-  <p id="msg"></p>
+<p id="status"></p>
 
-  <div id="loader" class="loader" style="display:none;">Generating...</div>
+<hr>
 
-  <div id="output" style="display:none;">
-    <h3>Pairing Code</h3>
-    <p id="pairCode"></p>
+<h3>Generated Pair Code</h3>
+<p id="pairCode" style="font-size:20px;font-weight:bold;"></p>
+<button onclick="copyCode()">Copy Pair Code</button>
 
-    <button onclick="copyCode()">Copy Code</button>
+<script>
+async function generate() {
+  const phone = document.getElementById("phone").value.trim();
+  const token = document.getElementById("token").value.trim();
+  const status = document.getElementById("status");
+  const output = document.getElementById("pairCode");
 
-    <h3>QR Code</h3>
-    <img id="qr" alt="QR Code">
+  output.innerText = "";
+  status.innerText = "Generating...";
 
-    <h3>Session ID</h3>
-    <p id="sessionId"></p>
+  if (!/^[1-9][0-9]{9,14}$/.test(phone)) {
+    status.innerText = "❌ Invalid phone number format";
+    return;
+  }
 
-    <button onclick="downloadSession()">Download Session ZIP</button>
-  </div>
-</div>
+  if (!token) {
+    status.innerText = "❌ Token required";
+    return;
+  }
 
-<script src="script.js"></script>
+  try {
+    const res = await fetch(
+      `/api/pair-code?phone=${phone}&token=${token}`
+    );
+    const data = await res.json();
+
+    if (data.error) {
+      status.innerText = "❌ " + data.error;
+      return;
+    }
+
+    output.innerText = data.pairCode;
+    status.innerText = "✅ Pair code generated successfully";
+
+  } catch (e) {
+    status.innerText = "❌ Server error";
+  }
+}
+
+function copyCode() {
+  const code = document.getElementById("pairCode").innerText;
+  if (!code) {
+    alert("No pair code to copy");
+    return;
+  }
+  navigator.clipboard.writeText(code);
+  alert("Pair code copied to clipboard");
+}
+</script>
+
 </body>
 </html>
