@@ -1,84 +1,79 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <title>SLEEK MD Pair Generator – Test</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pairing Code Generator</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
 </head>
-<body>
+<body class="bg-slate-900 text-white flex items-center justify-center min-h-screen">
 
-<h2>SLEEK MD – Pair Generator (Backend Test)</h2>
+    <div class="bg-slate-800 p-8 rounded-2xl shadow-2xl w-full max-w-md border border-slate-700">
+        <h2 class="text-3xl font-bold text-center mb-2 text-cyan-400">WhatsApp Pairer</h2>
+        <p class="text-slate-400 text-center mb-8 text-sm">Enter your number with country code (e.g., 254...)</p>
 
-<p>
-  <b>Phone number</b> (international format, digits only):
-</p>
-<input id="phone" placeholder="254712345678">
+        <div class="space-y-6">
+            <div>
+                <label class="block text-xs uppercase tracking-widest text-slate-500 font-semibold mb-2">Phone Number</label>
+                <div class="relative">
+                    <span class="absolute inset-y-0 left-0 pl-3 flex items-center text-slate-500">
+                        <i class="fas fa-phone"></i>
+                    </span>
+                    <input type="number" id="phoneNumber" placeholder="254700000000" 
+                        class="w-full bg-slate-900 border border-slate-700 rounded-lg py-3 pl-10 pr-4 focus:outline-none focus:border-cyan-500 transition-all text-lg">
+                </div>
+            </div>
 
-<p>
-  <b>Token</b>:
-</p>
-<input id="token" type="password" placeholder="Enter secret token">
+            <button id="submitBtn" onclick="getPairingCode()"
+                class="w-full bg-cyan-600 hover:bg-cyan-500 text-white font-bold py-3 rounded-lg transition-all shadow-lg active:scale-95 flex justify-center items-center">
+                <span>Generate Pair Code</span>
+            </button>
 
-<br><br>
-<button onclick="generate()">Generate Pair Code</button>
+            <div id="resultBox" class="hidden mt-8 p-6 bg-slate-900 rounded-xl border border-dashed border-cyan-800 text-center">
+                <p class="text-xs text-slate-500 uppercase mb-2">Your Pairing Code</p>
+                <div id="pairCode" class="text-4xl font-mono font-black text-cyan-400 tracking-widest">
+                    --------
+                </div>
+                <button onclick="copyCode()" class="mt-4 text-xs text-cyan-500 hover:text-cyan-300 transition-colors">
+                    <i class="fas fa-copy"></i> Copy to Clipboard
+                </button>
+            </div>
+        </div>
+    </div>
 
-<p id="status"></p>
+    <script>
+        async function getPairingCode() {
+            const num = document.getElementById('phoneNumber').value;
+            const btn = document.getElementById('submitBtn');
+            const resultBox = document.getElementById('resultBox');
+            const pairCodeDisplay = document.getElementById('pairCode');
 
-<hr>
+            if (!num) return alert("Please enter a phone number!");
 
-<h3>Generated Pair Code</h3>
-<p id="pairCode" style="font-size:20px;font-weight:bold;"></p>
-<button onclick="copyCode()">Copy Pair Code</button>
+            // UI Loading State
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fas fa-spinner animate-spin"></i> &nbsp; Requesting...';
 
-<script>
-async function generate() {
-  const phone = document.getElementById("phone").value.trim();
-  const token = document.getElementById("token").value.trim();
-  const status = document.getElementById("status");
-  const output = document.getElementById("pairCode");
+            try {
+                // We will build this Backend API in the next step
+                const response = await fetch(`/api/pair?number=${num}`);
+                const data = await response.json();
 
-  output.innerText = "";
-  status.innerText = "Generating...";
+                if (data.code) {
+                    resultBox.classList.remove('hidden');
+                    pairCodeDisplay.innerText = data.code;
+                } else {
+                    alert("Error: " + data.message);
+                }
+            } catch (err) {
+                // For now, it will fail because we haven't built the backend
+                alert("Server not found. Ready for Part 2: The Backend?");
+            } finally {
+                btn.disabled = false;
+                btn.innerText = 'Generate Pair Code';
+            }
+        }
 
-  if (!/^[1-9][0-9]{9,14}$/.test(phone)) {
-    status.innerText = "❌ Invalid phone number format";
-    return;
-  }
-
-  if (!token) {
-    status.innerText = "❌ Token required";
-    return;
-  }
-
-  try {
-    const res = await fetch(
-      `/api/pair-code?phone=${phone}&token=${token}`
-    );
-    const data = await res.json();
-
-    if (data.error) {
-      status.innerText = "❌ " + data.error;
-      return;
-    }
-
-    output.innerText = data.pairCode;
-    status.innerText = "✅ Pair code generated successfully";
-
-  } catch (e) {
-    status.innerText = "❌ Server error";
-  }
-}
-
-function copyCode() {
-  const code = document.getElementById("pairCode").innerText;
-  if (!code) {
-    alert("No pair code to copy");
-    return;
-  }
-  navigator.clipboard.writeText(code);
-  alert("Pair code copied to clipboard");
-}
-</script>
-
-</body>
-</html>
+        function copyCode() {
+            const code = document.getElementById('pairCode').innerText;
