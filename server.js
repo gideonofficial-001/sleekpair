@@ -18,7 +18,6 @@ app.use(express.static(path.join(__dirname, 'public')));
 const SESSIONS_FOLDER = path.join(__dirname, 'sessions');
 if (!fs.existsSync(SESSIONS_FOLDER)) fs.mkdirSync(SESSIONS_FOLDER, { recursive: true });
 
-// ── Active session registry ────────────────────────────────────────────────────
 const activeSessions = new Map();
 
 function sessionPath(sessionId) {
@@ -27,38 +26,34 @@ function sessionPath(sessionId) {
 
 function clearSession(sessionId) {
   const s = activeSessions.get(sessionId);
-  if (s?.sock) { try { s.sock.end(); } catch (_) {} }
+  if (s?.sock) { try { s.sock.ws?.close(); } catch (_) {} }
   activeSessions.delete(sessionId);
   const folder = sessionPath(sessionId);
   if (fs.existsSync(folder)) fs.rmSync(folder, { recursive: true, force: true });
 }
 
-// ── Encode entire session folder → base64 JSON blob ───────────────────────────
 function encodeSession(sessionId) {
   const folder = sessionPath(sessionId);
   if (!fs.existsSync(folder)) return null;
   const bundle = {};
   for (const file of fs.readdirSync(folder)) {
-    try {
-      bundle[file] = fs.readFileSync(path.join(folder, file), 'utf-8');
-    } catch (_) {}
+    try { bundle[file] = fs.readFileSync(path.join(folder, file), 'utf-8'); } catch (_) {}
   }
   return Buffer.from(JSON.stringify(bundle)).toString('base64');
 }
 
-// ── Send session string to user's WhatsApp ─────────────────────────────────────
 async function sendSessionToUser(sock, phoneNumber, sessionId, base64Session) {
   const jid = phoneNumber + '@s.whatsapp.net';
-  const message = [
-    `╭─────────────────────────╮`,
-    `│   *sleek-md Connected!* ✅  │`,
-    `╰─────────────────────────╯`,
+  const msg = [
+    `╭──────────────────────────╮`,
+    `│  *sleek-md Connected!* ✅  │`,
+    `╰──────────────────────────╯`,
     ``,
     `Your bot has been linked successfully.`,
     ``,
     `*Session ID:* \`${sessionId}\``,
     ``,
-    `*Session String (keep this safe 🔐):*`,
+    `*Session String (keep safe 🔐):*`,
     `\`\`\`${base64Session}\`\`\``,
     ``,
     `⚠️ _Do NOT share this with anyone._`,
@@ -66,10 +61,10 @@ async function sendSessionToUser(sock, phoneNumber, sessionId, base64Session) {
     ``,
     `— sleek-md by Sleek Tech`,
   ].join('\n');
-  await sock.sendMessage(jid, { text: message });
+  await sock.sendMessage(jid, { text: msg });
 }
 
-// ── Core pairing function ─────────────────────────────────────────────────────
+// ── Main pairing function ─────────────────────────────────────────────────────
 async function startPairingSession(sessionId, phoneNumber) {
   const sessionDir = sessionPath(sessionId);
   if (!fs.existsSync(sessionDir)) fs.mkdirSync(sessionDir, { recursive: true });
@@ -77,68 +72,85 @@ async function startPairingSession(sessionId, phoneNumber) {
   const { state, saveCreds } = await useMultiFileAuthState(sessionDir);
   const { version } = await fetchLatestBaileysVersion();
 
+  const logger = pino({ level: 'silent' });
+
   const sock = makeWASocket({
     version,
     auth: {
       creds: state.creds,
-      keys: makeCacheableSignalKeyStore(state.keys, pino({ level: 'silent' })),
+      keys: makeCacheableSignalKeyStore(state.keys, logger),
     },
+    logger,
     printQRInTerminal: false,
-    logger: pino({ level: 'silent' }),
-
-    // Critical: desktop Chrome fingerprint — shows as "Chrome (Desktop)"
-    // in WhatsApp Linked Devices and is accepted by WhatsApp's pairing flow
-    browser: ['Chrome (Linux)', 'Chrome', '124.0.6367.82'],
-
+    browser: ['Ubuntu', 'Chrome', '20.0.04'],
     mobile: false,
     syncFullHistory: false,
     markOnlineOnConnect: false,
-    generateHighQualityLinkPreview: false,
   });
 
   activeSessions.set(sessionId, { sock, status: 'waiting', phoneNumber });
   sock.ev.on('creds.update', saveCreds);
 
+  // ── THE FIX: request pairing code RIGHT AWAY if not yet registered ────────
+  // Do NOT wait for the QR event. Call this immediately after socket creation.
+  // This is what triggers WhatsApp to send the "Link a device" notification.
+  let codeSent = false;
+
+  const requestCode = async () => {
+    if (codeSent || sock.authState.creds.registered) return null;
+    codeSent = true;
+    try {
+      const code = await sock.requestPairingCode(phoneNumber);
+      return code?.match(/.{1,4}/g)?.join('-') ?? code;
+    } catch (err) {
+      throw new Error('Failed to get pairing code: ' + err.message);
+    }
+  };
+
   return new Promise((resolve, reject) => {
     const timeout = setTimeout(() => {
-      reject(new Error('Timed out — WhatsApp did not respond within 45 seconds.'));
+      reject(new Error('Timed out. Check your phone number includes the country code.'));
       clearSession(sessionId);
-    }, 45_000);
+    }, 60_000);
+
+    // ── Attempt code request on first connection.update ───────────────────
+    let codeResolved = false;
 
     sock.ev.on('connection.update', async (update) => {
-      const { connection, qr, lastDisconnect } = update;
+      const { connection, lastDisconnect, isNewLogin } = update;
 
-      // Intercept QR → request pairing code instead
-      if (qr) {
+      // Request code as soon as the socket starts connecting
+      if (!codeResolved && !sock.authState.creds.registered) {
         try {
-          // Small delay helps WhatsApp accept the code request reliably
-          await new Promise(r => setTimeout(r, 1500));
-          const code = await sock.requestPairingCode(phoneNumber);
-          clearTimeout(timeout);
-          const formatted = code?.match(/.{1,4}/g)?.join('-') ?? code;
-          activeSessions.get(sessionId).status = 'code_issued';
-          resolve({ code, formatted });
+          const formatted = await requestCode();
+          if (formatted && !codeResolved) {
+            codeResolved = true;
+            clearTimeout(timeout);
+            activeSessions.get(sessionId).status = 'code_issued';
+            resolve({ formatted });
+          }
         } catch (err) {
-          clearTimeout(timeout);
-          reject(err);
-          clearSession(sessionId);
+          if (!codeResolved) {
+            codeResolved = true;
+            clearTimeout(timeout);
+            reject(err);
+            clearSession(sessionId);
+          }
         }
-        return;
       }
 
       if (connection === 'open') {
-        clearTimeout(timeout);
         const session = activeSessions.get(sessionId);
         if (session) session.status = 'connected';
-        console.log(`[${sessionId}] Connected to WhatsApp`);
+        console.log(`[${sessionId}] ✅ Linked to WhatsApp`);
 
-        // Wait for socket to stabilise then send session string
+        // Send session string after socket stabilises
         setTimeout(async () => {
           try {
-            const base64Session = encodeSession(sessionId);
-            if (base64Session) {
-              await sendSessionToUser(sock, phoneNumber, sessionId, base64Session);
-              console.log(`[${sessionId}] Session string sent to +${phoneNumber}`);
+            const b64 = encodeSession(sessionId);
+            if (b64) {
+              await sendSessionToUser(sock, phoneNumber, sessionId, b64);
+              console.log(`[${sessionId}] 📤 Session string sent to +${phoneNumber}`);
             }
           } catch (err) {
             console.error(`[${sessionId}] Could not send session string:`, err.message);
@@ -151,11 +163,21 @@ async function startPairingSession(sessionId, phoneNumber) {
           ? lastDisconnect.error.output.statusCode
           : 0;
 
+        console.log(`[${sessionId}] Connection closed — code ${statusCode}`);
+
         if (statusCode === DisconnectReason.loggedOut) {
           clearSession(sessionId);
         } else {
           const session = activeSessions.get(sessionId);
           if (session) session.status = 'disconnected';
+
+          // If we closed before the code was sent, it's a real error
+          if (!codeResolved) {
+            codeResolved = true;
+            clearTimeout(timeout);
+            reject(new Error(`WhatsApp closed the connection (code ${statusCode}). Try again.`));
+            clearSession(sessionId);
+          }
         }
       }
     });
@@ -171,7 +193,7 @@ app.post('/api/request-code', async (req, res) => {
 
   const cleanNumber = phoneNumber.replace(/\D/g, '');
   if (cleanNumber.length < 7 || cleanNumber.length > 15) {
-    return res.status(400).json({ error: 'Invalid phone number. Include country code, digits only.' });
+    return res.status(400).json({ error: 'Invalid phone number. Include full country code, digits only.' });
   }
 
   sessionId = (sessionId || `sleek_${Date.now()}`).replace(/[^a-zA-Z0-9_-]/g, '_');
@@ -185,12 +207,11 @@ app.post('/api/request-code', async (req, res) => {
   }
 
   try {
-    const { code, formatted } = await startPairingSession(sessionId, cleanNumber);
+    const { formatted } = await startPairingSession(sessionId, cleanNumber);
     return res.json({
       success: true,
       sessionId,
       phoneNumber: cleanNumber,
-      code,
       formatted,
       expiresInSeconds: 160,
       note: 'After linking, your session string will be sent to your WhatsApp inbox.',
@@ -210,7 +231,7 @@ app.get('/api/status/:sessionId', (req, res) => {
 
 app.delete('/api/session/:sessionId', (req, res) => {
   clearSession(req.params.sessionId);
-  return res.json({ success: true, message: `Session ${req.params.sessionId} cleared.` });
+  return res.json({ success: true });
 });
 
 app.get('/api/sessions', (req, res) => {
@@ -221,4 +242,4 @@ app.get('/api/sessions', (req, res) => {
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`\n⚡ sleek-md Pairer running on http://localhost:${PORT}\n`));
+app.listen(PORT, () => console.log(`\n⚡ sleek-md Pairer on http://localhost:${PORT}\n`));
