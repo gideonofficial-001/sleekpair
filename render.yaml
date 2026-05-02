@@ -1,8 +1,24 @@
 services:
   - type: web
-    name: sleek-md-pair
+    name: sleek-md-pairer
     env: node
-    nodeVersion: "18"
-    buildCommand: "npm install"
-    startCommand: "npm start"
-    plan: free
+    region: oregon          # change to: frankfurt, singapore, or ohio if preferred
+    plan: free              # upgrade to "starter" ($7/mo) for persistent disk support
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /api/sessions
+
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 10000        # Render always injects this automatically too
+
+    # ── Persistent Disk (RECOMMENDED — keeps sessions alive across deploys) ──
+    # Uncomment the block below if you upgrade to a paid plan ($7+/mo).
+    # Without this, sessions/ is wiped every time you deploy or the server restarts.
+    #
+    # disk:
+    #   name: sleek-md-sessions
+    #   mountPath: /opt/render/project/src/sessions
+    #   sizeGB: 1
