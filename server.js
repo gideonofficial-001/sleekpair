@@ -1,251 +1,303 @@
-const express = require('express');
+'use strict';
+
+const express  = require('express');
+const path     = require('path');
+const fs       = require('fs');
+const pino     = require('pino');
+const { Boom } = require('@hapi/boom');
+
 const {
   makeWASocket,
   useMultiFileAuthState,
   DisconnectReason,
-  fetchLatestBaileysVersion,
   Browsers,
 } = require('@whiskeysockets/baileys');
-const { Boom } = require('@hapi/boom');
-const path = require('path');
-const fs = require('fs');
-const pino = require('pino');
 
-const app = express();
+// ─────────────────────────────────────────────────────────────────────────────
+// Setup
+// ─────────────────────────────────────────────────────────────────────────────
+
+const app    = express();
+const PORT   = process.env.PORT || 3000;
+const SESS   = path.join(__dirname, 'sessions');
+const logger = pino({ level: 'silent' });
+
+if (!fs.existsSync(SESS)) fs.mkdirSync(SESS, { recursive: true });
+
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
-const SESSIONS_FOLDER = path.join(__dirname, 'sessions');
-if (!fs.existsSync(SESSIONS_FOLDER)) fs.mkdirSync(SESSIONS_FOLDER, { recursive: true });
+// sessionId → { sock, status, phoneNumber }
+const registry = new Map();
 
-const activeSessions = new Map();
-const logger = pino({ level: 'silent' });
+// ─────────────────────────────────────────────────────────────────────────────
+// Helpers
+// ─────────────────────────────────────────────────────────────────────────────
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
+const sessDir  = (id) => path.join(SESS, id);
 
-function sessionPath(id) {
-  return path.join(SESSIONS_FOLDER, id);
+function wipeDir(id) {
+  const d = sessDir(id);
+  if (fs.existsSync(d)) fs.rmSync(d, { recursive: true, force: true });
 }
 
-function nukeSessionFolder(id) {
-  const folder = sessionPath(id);
-  if (fs.existsSync(folder)) fs.rmSync(folder, { recursive: true, force: true });
+function killSocket(id) {
+  const entry = registry.get(id);
+  if (!entry) return;
+  try { entry.sock?.ws?.close(); }   catch (_) {}
+  try { entry.sock?.end(undefined); } catch (_) {}
 }
 
-function clearSession(id) {
-  const s = activeSessions.get(id);
-  if (s?.sock) {
-    try { s.sock.ws?.close(); } catch (_) {}
-    try { s.sock.end(undefined); } catch (_) {}
-  }
-  activeSessions.delete(id);
-  nukeSessionFolder(id);
+function destroy(id) {
+  killSocket(id);
+  registry.delete(id);
+  wipeDir(id);
 }
 
 function encodeSession(id) {
-  const folder = sessionPath(id);
-  if (!fs.existsSync(folder)) return null;
+  const dir = sessDir(id);
+  if (!fs.existsSync(dir)) return null;
+
   const bundle = {};
-  for (const file of fs.readdirSync(folder)) {
-    try { bundle[file] = fs.readFileSync(path.join(folder, file), 'utf-8'); }
+  for (const f of fs.readdirSync(dir)) {
+    try { bundle[f] = fs.readFileSync(path.join(dir, f), 'utf-8'); }
     catch (_) {}
   }
-  const json = JSON.stringify(bundle);
-  if (Object.keys(bundle).length === 0) return null;
-  return Buffer.from(json).toString('base64');
+  if (!Object.keys(bundle).length) return null;
+  return Buffer.from(JSON.stringify(bundle)).toString('base64');
 }
 
-async function sendSessionToUser(sock, phoneNumber, sessionId, b64) {
-  const jid = phoneNumber + '@s.whatsapp.net';
-  const msg = [
+async function deliverSession(sock, phone, id, b64) {
+  const jid = phone + '@s.whatsapp.net';
+  const text = [
     `╭──────────────────────────╮`,
-    `│  *sleek-md Connected!* ✅  │`,
+    `│  *sleek-md Connected* ✅   │`,
     `╰──────────────────────────╯`,
     ``,
-    `*Session ID:* \`${sessionId}\``,
+    `Your bot is now linked to WhatsApp.`,
     ``,
-    `*Session String (keep safe 🔐):*`,
+    `*Session ID:*`,
+    `\`${id}\``,
+    ``,
+    `*Session String (back this up 🔐):*`,
     `\`\`\`${b64}\`\`\``,
     ``,
-    `⚠️ _Do NOT share this with anyone._`,
-    `— sleek-md by Sleek Tech`,
+    `⚠️ _Keep this private — it is your account key._`,
+    ``,
+    `— *sleek-md* by Sleek Tech`,
   ].join('\n');
-  await sock.sendMessage(jid, { text: msg });
+
+  await sock.sendMessage(jid, { text });
 }
 
-// ── Core pairing ──────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// Core: start a pairing session and return a code
+// ─────────────────────────────────────────────────────────────────────────────
 
-async function startPairingSession(sessionId, phoneNumber) {
-  // Always start with a clean folder — stale creds cause "connection closed"
-  nukeSessionFolder(sessionId);
-  const sessionDir = sessionPath(sessionId);
-  fs.mkdirSync(sessionDir, { recursive: true });
+function startPairing(sessionId, phoneNumber) {
+  return new Promise(async (resolve, reject) => {
 
-  const { state, saveCreds } = await useMultiFileAuthState(sessionDir);
-  const { version } = await fetchLatestBaileysVersion();
+    // ── 1. Fresh slate every time ──────────────────────────────────────────
+    wipeDir(sessionId);
+    fs.mkdirSync(sessDir(sessionId), { recursive: true });
 
-  const sock = makeWASocket({
-    version,
-    auth: state,                          // plain state, no makeCacheableSignalKeyStore
-    logger,
-    printQRInTerminal: false,
-    browser: Browsers.ubuntu('Chrome'),   // standard trusted fingerprint
-    mobile: false,
-    syncFullHistory: false,
-    markOnlineOnConnect: false,
-  });
+    // ── 2. Load (empty) auth state ─────────────────────────────────────────
+    const { state, saveCreds } = await useMultiFileAuthState(sessDir(sessionId));
 
-  activeSessions.set(sessionId, { sock, status: 'waiting', phoneNumber });
-  sock.ev.on('creds.update', saveCreds);
+    // ── 3. Create socket ───────────────────────────────────────────────────
+    //
+    //  IMPORTANT NOTES:
+    //  • Do NOT use fetchLatestBaileysVersion() — it makes an HTTP request
+    //    to WhatsApp that can fail on Render and produce a wrong version,
+    //    which causes an immediate close.
+    //  • Browsers.macOS('Safari') is the most accepted fingerprint right now.
+    //  • defaultQueryTimeoutMs: undefined prevents premature query timeouts.
+    //
+    const sock = makeWASocket({
+      auth:                    state,
+      logger,
+      printQRInTerminal:       false,
+      browser:                 Browsers.macOS('Safari'),
+      defaultQueryTimeoutMs:   undefined,
+      connectTimeoutMs:        60_000,
+      keepAliveIntervalMs:     10_000,
+      syncFullHistory:         false,
+      markOnlineOnConnect:     false,
+      generateHighQualityLinkPreview: false,
+    });
 
-  return new Promise((resolve, reject) => {
-    let resolved = false;
+    registry.set(sessionId, { sock, status: 'waiting', phoneNumber });
+    sock.ev.on('creds.update', saveCreds);
 
-    const done = (val) => {
-      if (resolved) return;
-      resolved = true;
-      clearTimeout(hardTimeout);
-      if (val instanceof Error) reject(val);
-      else resolve(val);
+    // ── 4. Guard: hard timeout ─────────────────────────────────────────────
+    let settled = false;
+
+    const finish = (err, code) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(guard);
+      if (err) { destroy(sessionId); reject(err); }
+      else resolve(code);
     };
 
-    // Hard timeout — 60 s
-    const hardTimeout = setTimeout(() => {
-      done(new Error('Timed out waiting for WhatsApp. Check the phone number and try again.'));
-      clearSession(sessionId);
+    const guard = setTimeout(() => {
+      finish(new Error(
+        'Timed out (60 s). WhatsApp never sent a QR signal. ' +
+        'This usually means the Render IP is rate-limited — wait a few minutes and try again.'
+      ));
     }, 60_000);
 
+    // ── 5. Listen for connection events ────────────────────────────────────
     sock.ev.on('connection.update', async (update) => {
       const { connection, qr, lastDisconnect } = update;
 
-      // ── QR event = WhatsApp is ready → swap in pairing code ──────────────
-      // This is the correct trigger. Do NOT call requestPairingCode() before this.
-      if (qr && !resolved) {
-        console.log(`[${sessionId}] QR received — requesting pairing code for +${phoneNumber}`);
+      // ── QR signal → this is our cue to request a pairing code ───────────
+      //
+      //  When Baileys emits a QR it means the WebSocket handshake with
+      //  WhatsApp is complete and the session is ready to be authenticated.
+      //  We intercept it and call requestPairingCode() instead of showing
+      //  the QR. This is the officially supported path.
+      //
+      if (qr) {
+        console.log(`[${sessionId}] QR ready — requesting pairing code…`);
         try {
-          const code = await sock.requestPairingCode(phoneNumber);
-          const formatted = code?.match(/.{1,4}/g)?.join('-') ?? code;
-          activeSessions.get(sessionId).status = 'code_issued';
+          const raw       = await sock.requestPairingCode(phoneNumber);
+          const formatted = raw?.match(/.{1,4}/g)?.join('-') ?? raw;
+
+          const entry = registry.get(sessionId);
+          if (entry) entry.status = 'code_issued';
+
           console.log(`[${sessionId}] Code: ${formatted}`);
-          done({ formatted });
+          finish(null, formatted);
+
         } catch (err) {
-          console.error(`[${sessionId}] requestPairingCode failed:`, err.message);
-          done(new Error('Could not get pairing code: ' + err.message));
-          clearSession(sessionId);
+          console.error(`[${sessionId}] requestPairingCode error:`, err.message);
+          finish(new Error('WhatsApp refused the pairing code request: ' + err.message));
         }
         return;
       }
 
-      // ── Fully linked ──────────────────────────────────────────────────────
+      // ── Fully linked ─────────────────────────────────────────────────────
       if (connection === 'open') {
-        const session = activeSessions.get(sessionId);
-        if (session) session.status = 'connected';
-        console.log(`[${sessionId}] ✅ Linked!`);
+        const entry = registry.get(sessionId);
+        if (entry) entry.status = 'connected';
+        console.log(`[${sessionId}] ✅ Linked to WhatsApp`);
 
+        // Give the socket 3 s to settle before sending a message
         setTimeout(async () => {
           try {
             const b64 = encodeSession(sessionId);
             if (b64) {
-              await sendSessionToUser(sock, phoneNumber, sessionId, b64);
-              console.log(`[${sessionId}] 📤 Session string sent`);
+              await deliverSession(sock, phoneNumber, sessionId, b64);
+              console.log(`[${sessionId}] 📨 Session string delivered`);
             }
-          } catch (err) {
-            console.error(`[${sessionId}] Send session failed:`, err.message);
+          } catch (e) {
+            console.error(`[${sessionId}] Could not deliver session string:`, e.message);
           }
         }, 3000);
       }
 
-      // ── Closed ───────────────────────────────────────────────────────────
+      // ── Disconnected ─────────────────────────────────────────────────────
       if (connection === 'close') {
-        const reason = lastDisconnect?.error instanceof Boom
+        const code = (lastDisconnect?.error instanceof Boom)
           ? lastDisconnect.error.output.statusCode
           : 0;
 
-        console.log(`[${sessionId}] Closed — reason ${reason}`);
+        console.log(`[${sessionId}] Closed — WA status code: ${code}`);
 
-        if (reason === DisconnectReason.loggedOut) {
-          clearSession(sessionId);
+        // Logged out → wipe and stop
+        if (code === DisconnectReason.loggedOut) {
+          destroy(sessionId);
           return;
         }
 
-        const session = activeSessions.get(sessionId);
-        if (session) session.status = 'disconnected';
+        // Update registry status
+        const entry = registry.get(sessionId);
+        if (entry) entry.status = 'disconnected';
 
-        // If we closed before issuing a code, surface the error
-        if (!resolved) {
-          const msg = reason === 401
-            ? 'WhatsApp rejected the session (401). The session folder was cleared — please try again.'
-            : reason === 408
-            ? 'Connection timed out from WhatsApp. Try again in a moment.'
-            : reason === 440
-            ? 'Another WhatsApp session opened on this account. Try again.'
-            : `Connection closed before code was issued (code ${reason}). Please try again.`;
+        // If we closed BEFORE the code was issued, surface a readable error
+        if (!settled) {
+          const msg =
+            code === 401 ? 'WhatsApp rejected the auth (401 Unauthorized). Clear sessions and try again.' :
+            code === 403 ? 'Access forbidden (403). Your number may be temporarily restricted by WhatsApp.' :
+            code === 408 ? 'Connection timed out (408). Try again in a minute.' :
+            code === 428 ? 'Connection not established (428). Render may be rate-limited — wait and retry.' :
+            code === 440 ? 'Logged out by another session (440). Try again.' :
+            code === 500 ? 'WhatsApp internal error (500). Try again shortly.' :
+                           `Connection closed (code ${code}) before a code could be issued. Try again.`;
 
-          done(new Error(msg));
-          clearSession(sessionId);
+          finish(new Error(msg));
         }
       }
     });
   });
 }
 
-// ── Routes ────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// Routes
+// ─────────────────────────────────────────────────────────────────────────────
 
+/**
+ * POST /api/request-code
+ * { phoneNumber: "2547XXXXXXXX", sessionId?: "my-bot" }
+ */
 app.post('/api/request-code', async (req, res) => {
-  let { phoneNumber, sessionId } = req.body;
+  let { phoneNumber, sessionId } = req.body ?? {};
 
-  if (!phoneNumber) return res.status(400).json({ error: 'phoneNumber is required.' });
+  if (!phoneNumber)
+    return res.status(400).json({ error: 'phoneNumber is required.' });
 
-  const cleanNumber = phoneNumber.replace(/\D/g, '');
-  if (cleanNumber.length < 7 || cleanNumber.length > 15) {
-    return res.status(400).json({ error: 'Invalid phone number — include country code, digits only.' });
-  }
+  const phone = phoneNumber.replace(/\D/g, '');
+  if (phone.length < 7 || phone.length > 15)
+    return res.status(400).json({ error: 'Invalid phone number. Use full number with country code, digits only. Example: 2547XXXXXXXX' });
 
-  sessionId = (sessionId || `sleek_${Date.now()}`).replace(/[^a-zA-Z0-9_-]/g, '_');
+  sessionId = (sessionId?.trim() || `sleek_${Date.now()}`).replace(/[^a-zA-Z0-9_-]/g, '_');
 
-  // Kill any stuck session with the same ID
-  if (activeSessions.has(sessionId)) {
-    const s = activeSessions.get(sessionId);
-    if (s.status === 'waiting' || s.status === 'code_issued') {
-      return res.status(409).json({ error: 'Pairing already in progress for this session.' });
-    }
-    clearSession(sessionId);
+  // Block duplicate in-progress pairings
+  if (registry.has(sessionId)) {
+    const { status } = registry.get(sessionId);
+    if (status === 'waiting' || status === 'code_issued')
+      return res.status(409).json({ error: 'Pairing already in progress. Wait or use a different session ID.' });
+    destroy(sessionId);
   }
 
   try {
-    const { formatted } = await startPairingSession(sessionId, cleanNumber);
+    const formatted = await startPairing(sessionId, phone);
     return res.json({
-      success: true,
+      success:          true,
       sessionId,
-      phoneNumber: cleanNumber,
+      phoneNumber:      phone,
       formatted,
       expiresInSeconds: 160,
-      note: 'After you enter the code in WhatsApp, your session string will be sent to your inbox.',
     });
   } catch (err) {
-    console.error(`[${sessionId}]`, err.message);
-    clearSession(sessionId);
+    console.error(`[${sessionId}] Fatal:`, err.message);
     return res.status(500).json({ error: err.message });
   }
 });
 
-app.get('/api/status/:sessionId', (req, res) => {
-  const s = activeSessions.get(req.params.sessionId);
-  if (!s) return res.json({ sessionId: req.params.sessionId, status: 'not_found' });
-  return res.json({ sessionId: req.params.sessionId, status: s.status, phoneNumber: s.phoneNumber });
+/** GET /api/status/:id */
+app.get('/api/status/:id', (req, res) => {
+  const e = registry.get(req.params.id);
+  if (!e) return res.json({ sessionId: req.params.id, status: 'not_found' });
+  return res.json({ sessionId: req.params.id, status: e.status, phoneNumber: e.phoneNumber });
 });
 
-app.delete('/api/session/:sessionId', (req, res) => {
-  clearSession(req.params.sessionId);
-  return res.json({ success: true });
+/** DELETE /api/session/:id */
+app.delete('/api/session/:id', (req, res) => {
+  destroy(req.params.id);
+  res.json({ success: true });
 });
 
-app.get('/api/sessions', (req, res) => {
-  const sessions = [...activeSessions.entries()].map(([id, s]) => ({
-    sessionId: id, status: s.status, phoneNumber: s.phoneNumber,
+/** GET /api/sessions */
+app.get('/api/sessions', (_req, res) => {
+  const sessions = [...registry.entries()].map(([id, e]) => ({
+    sessionId: id, status: e.status, phoneNumber: e.phoneNumber,
   }));
-  return res.json({ sessions });
+  res.json({ sessions });
 });
 
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`\n⚡ sleek-md Pairer on http://localhost:${PORT}\n`));
+// ─────────────────────────────────────────────────────────────────────────────
+app.listen(PORT, () => {
+  console.log(`\n⚡ sleek-md Pairer  →  http://localhost:${PORT}\n`);
+});
