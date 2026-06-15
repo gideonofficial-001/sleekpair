@@ -1,18 +1,18 @@
 {
-  "name": "whatsapp-pair-generator",
+  "name": "sleek-md-pairer",
   "version": "1.0.0",
-  "description": "WhatsApp pairing code generator for bots using Baileys",
+  "description": "sleek-md WhatsApp pairing code server",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
     "dev": "nodemon server.js"
   },
   "dependencies": {
-    "@whiskeysockets/baileys": "npm:toxic-baileys",
+    "@whiskeysockets/baileys": "6.7.9",
     "@hapi/boom": "^10.0.1",
     "express": "^4.18.2",
-    "qrcode": "^1.5.3",
-    "pino": "^8.21.0"
+    "pino": "^8.21.0",
+    "sharp": "^0.33.0"
   },
   "devDependencies": {
     "nodemon": "^3.1.0"
