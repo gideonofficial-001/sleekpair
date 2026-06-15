@@ -1,4 +1,22 @@
+# Dependencies
 node_modules/
-sessions/
-*.log
+
+# Environment
 .env
+.env.local
+
+# WhatsApp session auth — NEVER commit
+sessions/
+auth_info/
+
+# Logs
+*.log
+logs/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
